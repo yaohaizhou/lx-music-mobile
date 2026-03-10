@@ -1,6 +1,7 @@
 import { Platform, ToastAndroid, BackHandler, Linking, Dimensions, Alert, Appearance, PermissionsAndroid, AppState, StyleSheet, type ScaledSize } from 'react-native'
 // import ExtraDimensions from 'react-native-extra-dimensions-android'
 import Clipboard from '@react-native-clipboard/clipboard'
+import Toast from 'react-native-simple-toast'
 import { storageDataPrefix } from '@/config/constant'
 import { gzipFile, readFile, temporaryDirectoryPath, unGzipFile, unlink, writeFile } from '@/utils/fs'
 import { getSystemLocales, isIgnoringBatteryOptimization, isNotificationsEnabled, requestNotificationPermission, requestIgnoreBatteryOptimization, shareText } from '@/utils/nativeModules/utils'
@@ -56,9 +57,14 @@ export const TEMP_FILE_PATH = temporaryDirectoryPath + '/tempFile'
 //   // return windowSize
 // }
 
-export const checkStoragePermissions = async() => PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE)
+export const checkStoragePermissions = async() => {
+  if (!isAndroid) return true // iOS不需要存储权限
+  return PermissionsAndroid.check(PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE)
+}
 
 export const requestStoragePermission = async() => {
+  if (!isAndroid) return true // iOS不需要存储权限
+
   const isGranted = await checkStoragePermissions()
   if (isGranted) return isGranted
 
@@ -68,31 +74,14 @@ export const requestStoragePermission = async() => {
         PermissionsAndroid.PERMISSIONS.WRITE_EXTERNAL_STORAGE,
         PermissionsAndroid.PERMISSIONS.READ_EXTERNAL_STORAGE,
       ],
-      // {
-      //   title: '存储读写权限申请',
-      //   message:
-      //     '洛雪音乐助手需要使用存储读写权限才能下载歌曲.',
-      //   buttonNeutral: '一会再问我',
-      //   buttonNegative: '取消',
-      //   buttonPositive: '确定',
-      // },
     )
-    // console.log(granted)
-    // console.log(Object.values(granted).every(r => r === PermissionsAndroid.RESULTS.GRANTED))
-    // console.log(PermissionsAndroid.RESULTS)
     const granteds = Object.values(granted)
     return granteds.every(r => r === PermissionsAndroid.RESULTS.GRANTED)
       ? true
       : granteds.includes(PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN)
         ? null
         : false
-    // if (granted === PermissionsAndroid.RESULTS.GRANTED) {
-    //   console.log('You can use the storage')
-    // } else {
-    //   console.log('Storage permission denied')
-    // }
   } catch (err: any) {
-    // console.warn(err)
     return false
   }
 }
@@ -105,34 +94,51 @@ export const requestStoragePermission = async() => {
  * @param position 位置
  */
 export const toast = (message: string, duration: 'long' | 'short' = 'short', position: 'top' | 'center' | 'bottom' = 'bottom') => {
-  let _duration
-  switch (duration) {
-    case 'long':
-      _duration = ToastAndroid.LONG
-      break
-    case 'short':
-    default:
-      _duration = ToastAndroid.SHORT
-      break
+  if (isAndroid) {
+    let _duration
+    switch (duration) {
+      case 'long':
+        _duration = ToastAndroid.LONG
+        break
+      case 'short':
+      default:
+        _duration = ToastAndroid.SHORT
+        break
+    }
+    let _position
+    let offset: number
+    switch (position) {
+      case 'top':
+        _position = ToastAndroid.TOP
+        offset = 120
+        break
+      case 'center':
+        _position = ToastAndroid.CENTER
+        offset = 0
+        break
+      case 'bottom':
+      default:
+        _position = ToastAndroid.BOTTOM
+        offset = 120
+        break
+    }
+    ToastAndroid.showWithGravityAndOffset(message, _duration, _position, 0, offset)
+  } else {
+    // iOS使用react-native-simple-toast
+    const toastDuration = duration === 'long' ? Toast.LONG : Toast.SHORT
+    switch (position) {
+      case 'top':
+        Toast.showWithGravity(message, toastDuration, Toast.TOP)
+        break
+      case 'center':
+        Toast.showWithGravity(message, toastDuration, Toast.CENTER)
+        break
+      case 'bottom':
+      default:
+        Toast.showWithGravity(message, toastDuration, Toast.BOTTOM)
+        break
+    }
   }
-  let _position
-  let offset: number
-  switch (position) {
-    case 'top':
-      _position = ToastAndroid.TOP
-      offset = 120
-      break
-    case 'center':
-      _position = ToastAndroid.CENTER
-      offset = 0
-      break
-    case 'bottom':
-    default:
-      _position = ToastAndroid.BOTTOM
-      offset = 120
-      break
-  }
-  ToastAndroid.showWithGravityAndOffset(message, _duration, _position, 0, offset)
 }
 
 export const openUrl = async(url: string): Promise<void> => Linking.canOpenURL(url).then(async() => Linking.openURL(url))
@@ -147,7 +153,12 @@ export const assertApiSupport = (source: LX.Source): boolean => {
 // }
 
 export const exitApp = () => {
-  BackHandler.exitApp()
+  if (isAndroid) {
+    BackHandler.exitApp()
+  } else {
+    // iOS不支持程序退出，忽略调用
+    console.log('exitApp is not supported on iOS')
+  }
 }
 
 export const handleSaveFile = async(path: string, data: any) => {

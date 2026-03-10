@@ -24,6 +24,22 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+
+	<!-- 后台音频播放模式 -->
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>fetch</string>
+	</array>
+
+	<!-- 本地网络权限说明（WiFi同步） -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>需要访问本地网络以获取WiFi IP地址，用于局域网同步功能</string>
+
+	<!-- 通知权限说明 -->
+	<key>NSUserNotificationUsageDescription</key>
+	<string>需要通知权限以显示播放控制和歌词信息</string>
+
 	<key>NSAppTransportSecurity</key>
 	<dict>
 	  <!-- Do not change NSAllowsArbitraryLoads to true, or you will risk app rejection! -->

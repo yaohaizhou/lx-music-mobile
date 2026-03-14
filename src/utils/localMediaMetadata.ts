@@ -1,14 +1,69 @@
 import { temporaryDirectoryPath, readDir, unlink, extname } from '@/utils/fs'
-import { readPic as _readPic } from 'react-native-local-media-metadata'
-export {
-  type MusicMetadata,
-  type MusicMetadataFull,
-  readMetadata,
-  writeMetadata,
-  writePic,
-  readLyric,
-  writeLyric,
-} from 'react-native-local-media-metadata'
+import { isAndroid } from '@/utils/platform'
+
+// react-native-local-media-metadata 仅支持 Android
+const LocalMediaModule = isAndroid ? require('react-native-local-media-metadata') : null
+
+// 导出类型定义
+type MusicMetadata = {
+  type: 'mp3' | 'flac' | 'ogg' | 'wav'
+  bitrate: string
+  interval: number
+  size: number
+  ext: 'mp3' | 'flac' | 'ogg' | 'wav'
+  albumName: string
+  singer: string
+  name: string
+}
+
+type MusicMetadataFull = MusicMetadata & {
+  lyric: string
+}
+
+// 导出函数（iOS 上返回空实现）
+export const readMetadata = async (filePath: string): Promise<MusicMetadata | null> => {
+  if (!isAndroid) {
+    console.warn('readMetadata is not supported on iOS')
+    return null
+  }
+  return LocalMediaModule?.readMetadata?.(filePath) ?? null
+}
+
+export const writeMetadata = async (filePath: string, metadata: Partial<MusicMetadata>): Promise<void> => {
+  if (!isAndroid) {
+    console.warn('writeMetadata is not supported on iOS')
+    return
+  }
+  return LocalMediaModule?.writeMetadata?.(filePath, metadata)
+}
+
+export const writePic = async (filePath: string, picPath: string): Promise<void> => {
+  if (!isAndroid) {
+    console.warn('writePic is not supported on iOS')
+    return
+  }
+  return LocalMediaModule?.writePic?.(filePath, picPath)
+}
+
+export const readLyric = async (filePath: string): Promise<string> => {
+  if (!isAndroid) {
+    console.warn('readLyric is not supported on iOS')
+    return ''
+  }
+  return LocalMediaModule?.readLyric?.(filePath) ?? ''
+}
+
+export const writeLyric = async (filePath: string, lyric: string): Promise<void> => {
+  if (!isAndroid) {
+    console.warn('writeLyric is not supported on iOS')
+    return
+  }
+  return LocalMediaModule?.writeLyric?.(filePath, lyric)
+}
+
+export type { MusicMetadata, MusicMetadataFull }
+
+const _readPic = isAndroid ? LocalMediaModule?.readPic : null
 
 let cleared = false
 const picCachePath = temporaryDirectoryPath + '/local-media-metadata'

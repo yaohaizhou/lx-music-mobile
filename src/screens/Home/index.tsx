@@ -7,6 +7,7 @@ import Vertical from './Vertical'
 import Horizontal from './Horizontal'
 import { navigations } from '@/navigation'
 import settingState from '@/store/setting/state'
+import { Platform } from 'react-native'
 
 
 interface Props {
@@ -15,7 +16,7 @@ interface Props {
 
 
 export default ({ componentId }: Props) => {
-  const isHorizontalMode = useHorizontalMode()
+  const isHorizontalMode = Platform.OS === 'ios' ? false : useHorizontalMode()
   useEffect(() => {
     setComponentId(COMPONENT_IDS.home, componentId)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -28,6 +29,7 @@ export default ({ componentId }: Props) => {
 
   return (
     <PageContent>
+      {/* iOS 强行进入手机竖屏视图 */}
       {
         isHorizontalMode
           ? <Horizontal />

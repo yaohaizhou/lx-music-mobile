@@ -1,6 +1,12 @@
-import { NativeEventEmitter, NativeModules } from 'react-native'
+import { NativeEventEmitter, NativeModules, Platform } from 'react-native'
 
-const { UserApiModule } = NativeModules
+const UserApiModule = NativeModules.UserApiModule || {
+  loadScript: () => console.log('UserApiModule loadScript mock on iOS'),
+  sendAction: () => console.log('UserApiModule sendAction mock on iOS'),
+  destroy: () => console.log('UserApiModule destroy mock on iOS'),
+  addListener: () => {},
+  removeListeners: () => {},
+}
 
 let loadScriptInfo: LX.UserApi.UserApiInfo | null = null
 export const loadScript = (info: LX.UserApi.UserApiInfo & { script: string }) => {

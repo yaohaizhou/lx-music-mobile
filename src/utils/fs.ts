@@ -3,19 +3,56 @@
  * 处理 iOS 和 Android 的文件路径差异
  */
 
-import RNFS from 'react-native-fs';
-import {
-  Dirs,
-  FileSystem,
-  AndroidScoped,
-  type OpenDocumentOptions,
-  type Encoding,
-  type HashAlgorithm,
-  getExternalStoragePaths as _getExternalStoragePaths,
-} from 'react-native-file-system';
+import * as RNFS from 'react-native-fs';
 import { isAndroid, isIOS, platformSelect } from './platform';
 
-export type { FileType } from 'react-native-file-system';
+// Android 特有功能：react-native-file-system 仅在 Android 可用
+// iOS 使用 react-native-fs (RNFS) 作为替代
+interface FileSystemAndroidModule {
+  Dirs: {
+    CacheDir: string;
+    DatabaseDir?: string;
+    DocumentDir: string;
+    MainBundleDir: string;
+    SDCardDir: string;
+  };
+  FileSystem: {
+    ls(path: string): Promise<{ name: string }[]>;
+    unlink(path: string): Promise<boolean>;
+    mkdir(path: string): Promise<unknown>;
+    stat(path: string): Promise<{ size: number; lastModified: number; isFile: boolean; isDirectory: boolean }>;
+    hash(path: string, algorithm?: string): Promise<string>;
+    readFile(path: string, encoding?: string): Promise<string>;
+    mv(source: string, target: string): Promise<boolean>;
+    gzipFile(source: string, target: string): Promise<void>;
+    unGzipFile(source: string, target: string): Promise<void>;
+    gzipString(data: string, encoding?: string): Promise<string>;
+    unGzipString(data: string, encoding?: string): Promise<string>;
+    exists(path: string): Promise<boolean>;
+    rename(source: string, name: string): Promise<boolean>;
+    writeFile(path: string, data: string, encoding?: string): Promise<void>;
+    appendFile(path: string, data: string, encoding?: string): Promise<void>;
+  };
+  AndroidScoped: {
+    openDocumentTree(isPersist: boolean): Promise<{ path: string }>;
+    openDocument(options: { mimeTypes?: string[]; extTypes?: string[]; multi?: boolean; toPath?: string; encoding?: string }): Promise<{ path: string } | { path: string }[]>;
+    releasePersistableUriPermission(path: string): unknown;
+    getPersistedUriPermissions(): Promise<string[]>;
+  };
+  getExternalStoragePaths(isRemovable?: boolean): Promise<string[]>;
+}
+
+let FileSystemAndroid: FileSystemAndroidModule | null = null;
+if (isAndroid) {
+  try {
+    FileSystemAndroid = require('react-native-file-system');
+  } catch (e) {
+    console.warn('react-native-file-system not available on Android');
+  }
+}
+
+// 类型导出（兼容）
+export type FileType = 'file' | 'directory';
 
 /**
  * 获取文件扩展名
@@ -30,7 +67,7 @@ export const extname = (name: string): string =>
  * Android: /data/data/<package>/cache
  * iOS: <App Sandbox>/Library/Caches
  */
-export const temporaryDirectoryPath = Dirs.CacheDir;
+export const temporaryDirectoryPath = RNFS.CachesDirectoryPath;
 
 /**
  * 外部存储目录
@@ -38,7 +75,7 @@ export const temporaryDirectoryPath = Dirs.CacheDir;
  * iOS: 空字符串（iOS 没有外部存储概念）
  */
 export const externalStorageDirectoryPath = platformSelect({
-  android: Dirs.SDCardDir ?? '',
+  android: RNFS.ExternalStorageDirectoryPath ?? '',
   ios: '',
 });
 
@@ -47,7 +84,7 @@ export const externalStorageDirectoryPath = platformSelect({
  * Android: /data/data/<package>/files
  * iOS: <App Sandbox>/Documents
  */
-export const privateStorageDirectoryPath = Dirs.DocumentDir;
+export const privateStorageDirectoryPath = RNFS.DocumentDirectoryPath;
 
 /**
  * iOS Library 目录
@@ -56,7 +93,7 @@ export const privateStorageDirectoryPath = Dirs.DocumentDir;
  */
 export const iosLibraryDirectoryPath = platformSelect({
   android: '',
-  ios: (Dirs as any).LibraryDir ?? '',
+  ios: RNFS.LibraryDirectoryPath ?? '',
 });
 
 /**
@@ -65,8 +102,8 @@ export const iosLibraryDirectoryPath = platformSelect({
  * iOS: <LibraryDir>/Music（推荐）
  */
 export const musicDirectoryPath = platformSelect({
-  android: `${Dirs.DocumentDir}/Music`,
-  ios: `${(Dirs as any).LibraryDir ?? Dirs.DocumentDir}/Music`,
+  android: `${RNFS.DocumentDirectoryPath}/Music`,
+  ios: `${RNFS.LibraryDirectoryPath ?? RNFS.DocumentDirectoryPath}/Music`,
 });
 
 /**
@@ -75,8 +112,8 @@ export const musicDirectoryPath = platformSelect({
  * iOS: <LibraryDir>/Downloads
  */
 export const downloadsDirectoryPath = platformSelect({
-  android: `${Dirs.DocumentDir}/Downloads`,
-  ios: `${(Dirs as any).LibraryDir ?? Dirs.DocumentDir}/Downloads`,
+  android: `${RNFS.DocumentDirectoryPath}/Downloads`,
+  ios: `${RNFS.LibraryDirectoryPath ?? RNFS.DocumentDirectoryPath}/Downloads`,
 });
 
 // ========== Android 特有功能 ==========
@@ -88,8 +125,8 @@ export const downloadsDirectoryPath = platformSelect({
 export const getExternalStoragePaths = async (
   isRemovable?: boolean
 ): Promise<string[]> => {
-  if (!isAndroid) return [];
-  return _getExternalStoragePaths(isRemovable);
+  if (!isAndroid || !FileSystemAndroid) return [];
+  return FileSystemAndroid.getExternalStoragePaths(isRemovable);
 };
 
 /**
@@ -99,11 +136,13 @@ export const getExternalStoragePaths = async (
 export const selectManagedFolder = async (
   isPersist: boolean = false
 ): Promise<string | null> => {
-  if (!isAndroid) {
+  if (!isAndroid || !FileSystemAndroid) {
     console.warn('selectManagedFolder is Android only');
     return null;
   }
-  return AndroidScoped.openDocumentTree(isPersist);
+  const result = await FileSystemAndroid.AndroidScoped.openDocumentTree(isPersist);
+  // react-native-file-system 返回的是包含 path 属性的对象
+  return result?.path ?? null;
 };
 
 /**
@@ -111,13 +150,18 @@ export const selectManagedFolder = async (
  * 仅 Android 支持
  */
 export const selectFile = async (
-  options: OpenDocumentOptions
-): Promise<string | null> => {
-  if (!isAndroid) {
+  options: { mimeTypes?: string[]; extTypes?: string[]; multi?: boolean; toPath?: string; encoding?: string }
+): Promise<string | string[] | null> => {
+  if (!isAndroid || !FileSystemAndroid) {
     console.warn('selectFile is Android only');
     return null;
   }
-  return AndroidScoped.openDocument(options);
+  const result = await FileSystemAndroid.AndroidScoped.openDocument(options);
+  // react-native-file-system 返回的是 FileType 对象或对象数组
+  if (Array.isArray(result)) {
+    return result.map(item => item.path);
+  }
+  return result?.path ?? null;
 };
 
 /**
@@ -125,8 +169,8 @@ export const selectFile = async (
  * 仅 Android 支持
  */
 export const removeManagedFolder = async (path: string): Promise<void> => {
-  if (!isAndroid) return;
-  return AndroidScoped.releasePersistableUriPermission(path);
+  if (!isAndroid || !FileSystemAndroid) return;
+  await FileSystemAndroid.AndroidScoped.releasePersistableUriPermission(path);
 };
 
 /**
@@ -134,8 +178,8 @@ export const removeManagedFolder = async (path: string): Promise<void> => {
  * 仅 Android 支持
  */
 export const getManagedFolders = async (): Promise<string[]> => {
-  if (!isAndroid) return [];
-  return AndroidScoped.getPersistedUriPermissions();
+  if (!isAndroid || !FileSystemAndroid) return [];
+  return FileSystemAndroid.AndroidScoped.getPersistedUriPermissions();
 };
 
 /**
@@ -150,20 +194,24 @@ export const getPersistedUriList = getManagedFolders;
 /**
  * 读取目录内容
  */
-export const readDir = async (path: string): Promise<string[]> =>
-  FileSystem.ls(path);
+export const readDir = async (path: string): Promise<string[]> => {
+  const result = await RNFS.readDir(path);
+  return result.map(item => item.name);
+};
 
 /**
  * 删除文件或目录
  */
-export const unlink = async (path: string): Promise<void> =>
-  FileSystem.unlink(path);
+export const unlink = async (path: string): Promise<void> => {
+  await RNFS.unlink(path);
+};
 
 /**
  * 创建目录
  */
-export const mkdir = async (path: string): Promise<void> =>
-  FileSystem.mkdir(path);
+export const mkdir = async (path: string): Promise<void> => {
+  await RNFS.mkdir(path, { NSURLIsExcludedFromBackupKey: true });
+};
 
 /**
  * 获取文件状态
@@ -172,23 +220,39 @@ export const stat = async (path: string): Promise<{
   size: number;
   modificationTime: number;
   type: 'file' | 'directory';
-}> => FileSystem.stat(path);
+}> => {
+  const result = await RNFS.stat(path);
+  return {
+    size: Number(result.size),
+    modificationTime: Number(result.mtime),
+    type: result.isDirectory() ? 'directory' : 'file',
+  };
+};
 
 /**
- * 计算文件哈希
+ * 计算文件哈希 (MD5)
+ * 注意：react-native-fs 只支持 MD5
  */
 export const hash = async (
   path: string,
-  algorithm: HashAlgorithm
-): Promise<string> => FileSystem.hash(path, algorithm);
+  algorithm: 'md5' | 'sha1' | 'sha256' = 'md5'
+): Promise<string> => {
+  // RNFS 只支持 MD5，如果需要其他算法需要在原生端实现
+  if (algorithm !== 'md5') {
+    console.warn(`RNFS only supports md5 hash, requested: ${algorithm}`);
+  }
+  return RNFS.hash(path, 'md5');
+};
 
 /**
  * 读取文件内容
  */
 export const readFile = async (
   path: string,
-  encoding?: Encoding
-): Promise<string> => FileSystem.readFile(path, encoding);
+  encoding?: 'utf8' | 'base64' | 'ascii'
+): Promise<string> => {
+  return RNFS.readFile(path, encoding ?? 'utf8');
+};
 
 /**
  * 移动文件
@@ -196,51 +260,85 @@ export const readFile = async (
 export const moveFile = async (
   fromPath: string,
   toPath: string
-): Promise<void> => FileSystem.mv(fromPath, toPath);
+): Promise<void> => {
+  await RNFS.moveFile(fromPath, toPath);
+};
 
 /**
  * 压缩文件（Gzip）
+ * 注意：RNFS 不直接支持 gzip，需要使用原生模块或其他库
  */
 export const gzipFile = async (
   fromPath: string,
   toPath: string
-): Promise<void> => FileSystem.gzipFile(fromPath, toPath);
+): Promise<void> => {
+  // 如果 Android 上有 react-native-file-system，使用它
+  if (isAndroid && FileSystemAndroid) {
+    return FileSystemAndroid.FileSystem.gzipFile(fromPath, toPath);
+  }
+  throw new Error('gzipFile is not supported on iOS. Use a gzip library like pako or react-native-zip-archive.');
+};
 
 /**
  * 解压文件（Gzip）
+ * 注意：RNFS 不直接支持 gzip
  */
 export const unGzipFile = async (
   fromPath: string,
   toPath: string
-): Promise<void> => FileSystem.unGzipFile(fromPath, toPath);
+): Promise<void> => {
+  // 如果 Android 上有 react-native-file-system，使用它
+  if (isAndroid && FileSystemAndroid) {
+    return FileSystemAndroid.FileSystem.unGzipFile(fromPath, toPath);
+  }
+  throw new Error('unGzipFile is not supported on iOS. Use a gzip library like pako or react-native-zip-archive.');
+};
 
 /**
  * 压缩字符串（Gzip）
+ * 注意：RNFS 不直接支持 gzip
  */
 export const gzipString = async (
   data: string,
-  encoding?: Encoding
-): Promise<string> => FileSystem.gzipString(data, encoding);
+  encoding?: 'utf8' | 'base64'
+): Promise<string> => {
+  // 如果 Android 上有 react-native-file-system，使用它
+  if (isAndroid && FileSystemAndroid) {
+    return FileSystemAndroid.FileSystem.gzipString(data, encoding);
+  }
+  throw new Error('gzipString is not supported on iOS. Use a gzip library like pako.');
+};
 
 /**
  * 解压字符串（Gzip）
+ * 注意：RNFS 不直接支持 gzip
  */
 export const unGzipString = async (
   data: string,
-  encoding?: Encoding
-): Promise<string> => FileSystem.unGzipString(data, encoding);
+  encoding?: 'utf8' | 'base64'
+): Promise<string> => {
+  // 如果 Android 上有 react-native-file-system，使用它
+  if (isAndroid && FileSystemAndroid) {
+    return FileSystemAndroid.FileSystem.unGzipString(data, encoding);
+  }
+  throw new Error('unGzipString is not supported on iOS. Use a gzip library like pako.');
+};
 
 /**
  * 检查文件是否存在
  */
-export const existsFile = async (path: string): Promise<boolean> =>
-  FileSystem.exists(path);
+export const existsFile = async (path: string): Promise<boolean> => {
+  return RNFS.exists(path);
+};
 
 /**
  * 重命名文件
  */
-export const rename = async (path: string, name: string): Promise<void> =>
-  FileSystem.rename(path, name);
+export const rename = async (path: string, name: string): Promise<void> => {
+  const parentPath = path.substring(0, path.lastIndexOf('/') + 1);
+  const newPath = parentPath + name;
+  await RNFS.moveFile(path, newPath);
+};
 
 /**
  * 写入文件
@@ -248,8 +346,10 @@ export const rename = async (path: string, name: string): Promise<void> =>
 export const writeFile = async (
   path: string,
   data: string,
-  encoding?: Encoding
-): Promise<void> => FileSystem.writeFile(path, data, encoding);
+  encoding?: 'utf8' | 'base64' | 'ascii'
+): Promise<void> => {
+  await RNFS.writeFile(path, data, encoding ?? 'utf8');
+};
 
 /**
  * 追加写入文件
@@ -257,8 +357,10 @@ export const writeFile = async (
 export const appendFile = async (
   path: string,
   data: string,
-  encoding?: Encoding
-): Promise<void> => FileSystem.appendFile(path, data, encoding);
+  encoding?: 'utf8' | 'base64' | 'ascii'
+): Promise<void> => {
+  await RNFS.appendFile(path, data, encoding ?? 'utf8');
+};
 
 // ========== 下载功能 ==========
 
@@ -321,8 +423,8 @@ export const fromFileUrl = (url: string): string => {
  */
 export const getDefaultStoragePath = (): string => {
   return platformSelect({
-    android: `${Dirs.DocumentDir}/Downloads`,
-    ios: `${(Dirs as any).LibraryDir ?? Dirs.DocumentDir}/Downloads`,
+    android: `${RNFS.DocumentDirectoryPath}/Downloads`,
+    ios: `${RNFS.LibraryDirectoryPath ?? RNFS.DocumentDirectoryPath}/Downloads`,
   });
 };
 
